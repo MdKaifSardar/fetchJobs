@@ -69,10 +69,10 @@
 
     if (scrollHeight <= clientHeight) return;
 
-    const step = Math.max(200, Math.floor(clientHeight / 2));
+    const step = Math.max(250, Math.floor(clientHeight / 2));
     let currentScroll = isWindow ? window.scrollY : container.scrollTop;
 
-    while (currentScroll + clientHeight < scrollHeight - 50) {
+    while (currentScroll + clientHeight < scrollHeight - 30) {
       currentScroll += step;
       if (isWindow) {
         window.scrollTo({ top: currentScroll, behavior: 'smooth' });
@@ -82,10 +82,15 @@
       await sleep(150);
     }
 
-    // Brief pause at bottom to let dynamic items render
-    await sleep(350);
+    // Pause at bottom to ensure occluded cards render
+    await sleep(400);
+  };
 
-    // Scroll back to top for good measure
+  // Scroll container back to top
+  const scrollToTop = async () => {
+    const container = getJobsContainer();
+    if (!container) return;
+    const isWindow = container === window;
     if (isWindow) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
@@ -96,7 +101,6 @@
 
   // Parse visible job cards on the current DOM
   const extractJobsFromDOM = (jobsMap) => {
-    // Select all potential job card elements
     const cardElements = document.querySelectorAll(
       'li[data-occludable-job-id], div[data-job-id], [componentkey^="job-card-component-ref-"], .job-card-container'
     );
@@ -143,7 +147,6 @@
           'a.job-card-list__title--link, a.job-card-container__link, .artdeco-entity-lockup__title a'
         );
         if (titleEl) {
-          // Check for strong tag inside or fallback to innerText
           const strong = titleEl.querySelector('strong');
           title = strong ? strong.innerText.trim() : titleEl.innerText.trim();
         }
@@ -161,7 +164,6 @@
       const locationEl = card.querySelector('.job-card-container__metadata-wrapper li, .artdeco-entity-lockup__caption');
       if (locationEl) location = locationEl.innerText.trim();
 
-      // Fallback via paragraphs if company/location missing
       if (!company || !location) {
         const paragraphs = Array.from(card.querySelectorAll('p'))
           .map(p => p.innerText.trim().split('\n')[0])
@@ -208,7 +210,6 @@
       // 8. URL
       const url = `https://www.linkedin.com/jobs/view/${jobId}`;
 
-      // Save to map
       jobsMap.set(jobId, {
         jobId,
         title,
@@ -227,46 +228,90 @@
     return newJobsFound;
   };
 
+  // Click element reliably with full mouse events
+  const clickElement = (el) => {
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.focus();
+    el.click();
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  };
+
   // Attempt to navigate to the next page using LinkedIn SPA pagination
-  const navigateToNextPage = async (previousJobIds) => {
-    const nextBtn =
+  const navigateToNextPage = async (previousJobIds, targetPageIndex) => {
+    // 1. Scroll down to pagination section so buttons are in view and interactive
+    const paginationSection = document.querySelector('.jobs-search-pagination, .jobs-search-results-list__pagination');
+    if (paginationSection) {
+      paginationSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(300);
+    }
+
+    // 2. Look for target page button or Next button
+    const pageNum = targetPageIndex + 1; // 1-indexed (Page 2, Page 3, Page 4...)
+    let nextBtn =
+      document.querySelector(`button[aria-label="Page ${pageNum}"]`) ||
+      document.querySelector(`button[aria-label="Go to page ${pageNum}"]`) ||
       document.querySelector('button.jobs-search-pagination__button--next') ||
       document.querySelector('button[aria-label="View next page"]') ||
       document.querySelector('.jobs-search-pagination__pages .jobs-search-pagination__indicator-button--active')?.parentElement?.nextElementSibling?.querySelector('button');
 
     if (!nextBtn || nextBtn.disabled || nextBtn.getAttribute('aria-disabled') === 'true') {
-      console.log('No next page button found or pagination ended.');
+      console.log(`No pagination button found for Page ${pageNum} or pagination ended.`);
       return false;
     }
 
-    console.log('Clicking Next page button...');
-    nextBtn.click();
+    console.log(`Clicking pagination button for Page ${pageNum}...`);
+    clickElement(nextBtn);
 
-    // Poll until DOM updates with new Job IDs or timeout reached
+    // 3. Poll for new job IDs in DOM
     const startTime = Date.now();
-    const maxWait = 4000;
+    const maxWait = 4500;
 
     while (Date.now() - startTime < maxWait) {
       await sleep(300);
-      const currentCards = document.querySelectorAll('li[data-occludable-job-id], div[data-job-id]');
-      let foundNewId = false;
+      const currentCards = document.querySelectorAll('li[data-occludable-job-id], div[data-job-id], [componentkey^="job-card-component-ref-"]');
 
       for (const card of currentCards) {
-        const id = card.getAttribute('data-job-id') || card.getAttribute('data-occludable-job-id');
+        let id = card.getAttribute('data-job-id') || card.getAttribute('data-occludable-job-id');
+        if (!id) {
+          const compKey = card.getAttribute('componentkey');
+          if (compKey) {
+            const match = compKey.match(/ref-(\d+)/);
+            if (match) id = match[1];
+          }
+        }
         if (id && !previousJobIds.has(id)) {
-          foundNewId = true;
-          break;
+          await sleep(500); // Give LinkedIn time to settle DOM rendering
+          await scrollToTop();
+          return true;
         }
       }
+    }
 
-      if (foundNewId) {
-        await sleep(500); // Allow additional rendering time
+    // 4. Fallback: If button click did not trigger SPA load, try URL searchParams start update
+    console.warn('Button click did not load new jobs in time. Trying URL start parameter update...');
+    const startOffset = targetPageIndex * 25;
+    const url = new URL(window.location.href);
+    url.searchParams.set('start', startOffset.toString());
+    
+    // Update URL via pushState
+    window.history.pushState({}, '', url.toString());
+    window.dispatchEvent(new Event('popstate'));
+    await sleep(1500);
+
+    // Check once more after URL fallback
+    const checkCards = document.querySelectorAll('li[data-occludable-job-id], div[data-job-id]');
+    for (const card of checkCards) {
+      const id = card.getAttribute('data-job-id') || card.getAttribute('data-occludable-job-id');
+      if (id && !previousJobIds.has(id)) {
+        await scrollToTop();
         return true;
       }
     }
 
-    // Default return true if max timeout reached (will process whatever DOM has)
-    return true;
+    return false;
   };
 
   // Main Extraction Flow
@@ -287,30 +332,32 @@
 
     notifyProgress(0);
 
-    let attemptsWithoutNewJobs = 0;
+    let pageIndex = 0; // 0 = Page 1, 1 = Page 2, 2 = Page 3, 3 = Page 4
+    let consecutiveFailures = 0;
 
-    while (jobsMap.size < targetCount && attemptsWithoutNewJobs < 3) {
-      // Step 1: Un-occlude virtual cards by scrolling
+    while (jobsMap.size < targetCount && consecutiveFailures < 2) {
+      // Step 1: Un-occlude virtual cards by scrolling container
       await unoccludeJobCards();
 
       // Step 2: Extract visible jobs
-      const previousCount = jobsMap.size;
+      const countBefore = jobsMap.size;
       extractJobsFromDOM(jobsMap);
-      const currentCount = jobsMap.size;
+      const countAfter = jobsMap.size;
 
-      notifyProgress(currentCount);
+      notifyProgress(countAfter);
 
-      if (currentCount >= targetCount) break;
-
-      if (currentCount === previousCount) {
-        attemptsWithoutNewJobs++;
-      } else {
-        attemptsWithoutNewJobs = 0;
-      }
+      if (countAfter >= targetCount) break;
 
       // Step 3: Navigate to next page
-      const pageChanged = await navigateToNextPage(jobsMap);
-      if (!pageChanged) break;
+      pageIndex++;
+      const pageChanged = await navigateToNextPage(jobsMap, pageIndex);
+
+      if (!pageChanged) {
+        console.warn(`Failed to navigate to page index ${pageIndex}. Retrying or stopping.`);
+        consecutiveFailures++;
+      } else {
+        consecutiveFailures = 0;
+      }
     }
 
     // Generate CSV
