@@ -3,10 +3,13 @@
   if (window.__linkedin_job_collector_injected) return;
   window.__linkedin_job_collector_injected = true;
 
-  console.log('LinkedIn Job Collector Content Script loaded.');
+  console.log('LinkedIn Job Collector (Stealth Edition) loaded.');
 
-  // Helper: Sleep utility
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  // Helper: Sleep with randomized human jitter
+  const sleepRandom = (minMs, maxMs) => {
+    const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+    return new Promise(resolve => setTimeout(resolve, ms));
+  };
 
   // Helper: Escape string for CSV output
   const escapeCSV = (val) => {
@@ -58,8 +61,8 @@
     );
   };
 
-  // Smooth scroll container to un-occlude all virtual-scroll job cards
-  const unoccludeJobCards = async () => {
+  // Human-like stealth scrolling to un-occlude virtual cards on current page
+  const stealthUnoccludeCards = async () => {
     const container = getJobsContainer();
     if (!container) return;
 
@@ -69,43 +72,41 @@
 
     if (scrollHeight <= clientHeight) return;
 
-    const step = Math.max(250, Math.floor(clientHeight / 2));
     let currentScroll = isWindow ? window.scrollY : container.scrollTop;
 
+    // Micro-step scrolling with randomized distance & human jitter delay
     while (currentScroll + clientHeight < scrollHeight - 30) {
-      currentScroll += step;
+      const randomStep = Math.floor(Math.random() * 140) + 140; // 140px - 280px step
+      currentScroll += randomStep;
+
       if (isWindow) {
         window.scrollTo({ top: currentScroll, behavior: 'smooth' });
       } else {
         container.scrollTo({ top: currentScroll, behavior: 'smooth' });
       }
-      await sleep(150);
+
+      await sleepRandom(90, 210); // Human-like variable delay
     }
 
-    // Pause at bottom to ensure occluded cards render
-    await sleep(400);
-  };
+    // Brief natural pause at bottom
+    await sleepRandom(300, 500);
 
-  // Scroll container back to top
-  const scrollToTop = async () => {
-    const container = getJobsContainer();
-    if (!container) return;
-    const isWindow = container === window;
+    // Smoothly scroll back to top
     if (isWindow) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       container.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    await sleep(200);
+    await sleepRandom(200, 350);
   };
 
-  // Parse visible job cards on the current DOM
-  const extractJobsFromDOM = (jobsMap) => {
+  // Extract visible job cards on current page DOM
+  const extractPageJobs = () => {
+    const jobsMap = new Map();
+
     const cardElements = document.querySelectorAll(
       'li[data-occludable-job-id], div[data-job-id], [componentkey^="job-card-component-ref-"], .job-card-container'
     );
-
-    let newJobsFound = 0;
 
     cardElements.forEach(card => {
       // 1. Extract Job ID
@@ -221,146 +222,24 @@
         isVerified,
         url
       });
-
-      newJobsFound++;
     });
 
-    return newJobsFound;
+    return jobsMap;
   };
 
-  // Click element reliably with full mouse events
-  const clickElement = (el) => {
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.focus();
-    el.click();
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-  };
+  // Main Single-Page Extraction Flow (100% Stealth Mode)
+  const runSinglePageCollection = async () => {
+    // Step 1: Smooth human-like micro-scroll to reveal occluded cards
+    await stealthUnoccludeCards();
 
-  // Attempt to navigate to the next page using LinkedIn SPA pagination
-  const navigateToNextPage = async (previousJobIds, targetPageIndex) => {
-    // 1. Scroll down to pagination section so buttons are in view and interactive
-    const paginationSection = document.querySelector('.jobs-search-pagination, .jobs-search-results-list__pagination');
-    if (paginationSection) {
-      paginationSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(300);
+    // Step 2: Read current DOM cards
+    const jobsMap = extractPageJobs();
+
+    if (jobsMap.size === 0) {
+      throw new Error('No job cards found on current page.');
     }
 
-    // 2. Look for target page button or Next button
-    const pageNum = targetPageIndex + 1; // 1-indexed (Page 2, Page 3, Page 4...)
-    let nextBtn =
-      document.querySelector(`button[aria-label="Page ${pageNum}"]`) ||
-      document.querySelector(`button[aria-label="Go to page ${pageNum}"]`) ||
-      document.querySelector('button.jobs-search-pagination__button--next') ||
-      document.querySelector('button[aria-label="View next page"]') ||
-      document.querySelector('.jobs-search-pagination__pages .jobs-search-pagination__indicator-button--active')?.parentElement?.nextElementSibling?.querySelector('button');
-
-    if (!nextBtn || nextBtn.disabled || nextBtn.getAttribute('aria-disabled') === 'true') {
-      console.log(`No pagination button found for Page ${pageNum} or pagination ended.`);
-      return false;
-    }
-
-    console.log(`Clicking pagination button for Page ${pageNum}...`);
-    clickElement(nextBtn);
-
-    // 3. Poll for new job IDs in DOM
-    const startTime = Date.now();
-    const maxWait = 4500;
-
-    while (Date.now() - startTime < maxWait) {
-      await sleep(300);
-      const currentCards = document.querySelectorAll('li[data-occludable-job-id], div[data-job-id], [componentkey^="job-card-component-ref-"]');
-
-      for (const card of currentCards) {
-        let id = card.getAttribute('data-job-id') || card.getAttribute('data-occludable-job-id');
-        if (!id) {
-          const compKey = card.getAttribute('componentkey');
-          if (compKey) {
-            const match = compKey.match(/ref-(\d+)/);
-            if (match) id = match[1];
-          }
-        }
-        if (id && !previousJobIds.has(id)) {
-          await sleep(500); // Give LinkedIn time to settle DOM rendering
-          await scrollToTop();
-          return true;
-        }
-      }
-    }
-
-    // 4. Fallback: If button click did not trigger SPA load, try URL searchParams start update
-    console.warn('Button click did not load new jobs in time. Trying URL start parameter update...');
-    const startOffset = targetPageIndex * 25;
-    const url = new URL(window.location.href);
-    url.searchParams.set('start', startOffset.toString());
-    
-    // Update URL via pushState
-    window.history.pushState({}, '', url.toString());
-    window.dispatchEvent(new Event('popstate'));
-    await sleep(1500);
-
-    // Check once more after URL fallback
-    const checkCards = document.querySelectorAll('li[data-occludable-job-id], div[data-job-id]');
-    for (const card of checkCards) {
-      const id = card.getAttribute('data-job-id') || card.getAttribute('data-occludable-job-id');
-      if (id && !previousJobIds.has(id)) {
-        await scrollToTop();
-        return true;
-      }
-    }
-
-    return false;
-  };
-
-  // Main Extraction Flow
-  const runCollection = async (targetCount = 100) => {
-    const jobsMap = new Map();
-
-    const notifyProgress = (current) => {
-      try {
-        chrome.runtime.sendMessage({
-          type: 'PROGRESS',
-          current: Math.min(current, targetCount),
-          target: targetCount
-        });
-      } catch (e) {
-        // Context invalidation guard
-      }
-    };
-
-    notifyProgress(0);
-
-    let pageIndex = 0; // 0 = Page 1, 1 = Page 2, 2 = Page 3, 3 = Page 4
-    let consecutiveFailures = 0;
-
-    while (jobsMap.size < targetCount && consecutiveFailures < 2) {
-      // Step 1: Un-occlude virtual cards by scrolling container
-      await unoccludeJobCards();
-
-      // Step 2: Extract visible jobs
-      const countBefore = jobsMap.size;
-      extractJobsFromDOM(jobsMap);
-      const countAfter = jobsMap.size;
-
-      notifyProgress(countAfter);
-
-      if (countAfter >= targetCount) break;
-
-      // Step 3: Navigate to next page
-      pageIndex++;
-      const pageChanged = await navigateToNextPage(jobsMap, pageIndex);
-
-      if (!pageChanged) {
-        console.warn(`Failed to navigate to page index ${pageIndex}. Retrying or stopping.`);
-        consecutiveFailures++;
-      } else {
-        consecutiveFailures = 0;
-      }
-    }
-
-    // Generate CSV
+    // Step 3: Generate CSV
     const headers = [
       'Job ID', 'Title', 'Company', 'Location', 'Salary',
       'Posted Date', 'Easy Apply', 'Verified', 'URL'
@@ -385,7 +264,7 @@
 
     const csvContent = rows.join('\n');
 
-    // Copy to clipboard
+    // Step 4: Copy directly to clipboard
     const copied = await copyToClipboard(csvContent);
 
     if (!copied) {
@@ -403,9 +282,7 @@
     }
 
     if (request.action === 'START_COLLECTION') {
-      const targetCount = request.targetCount || 100;
-
-      runCollection(targetCount)
+      runSinglePageCollection()
         .then((count) => {
           sendResponse({ success: true, count });
         })
@@ -414,7 +291,7 @@
           sendResponse({ success: false, error: err.message || 'Extraction failed' });
         });
 
-      return true; // Keep message channel open for async response
+      return true; // Asynchronous response channel
     }
   });
 

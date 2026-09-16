@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     collectBtn.disabled = loading;
     spinner.style.display = loading ? 'inline-block' : 'none';
     if (!loading) {
-      btnText.textContent = 'Copy 100 Jobs';
+      btnText.textContent = 'Copy Page Jobs';
     }
   };
 
@@ -28,17 +28,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // Listen for real-time progress updates from content script
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message && message.type === 'PROGRESS') {
-      const { current, target } = message;
-      updateStatus(`Collecting... ${current}/${target}`);
-    }
-  });
-
   collectBtn.addEventListener('click', async () => {
     setLoading(true);
-    updateStatus('Collecting... 0/100');
+    updateStatus('Scanning page...');
 
     try {
       // Ensure content script is injected
@@ -54,20 +46,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Send start collection command
       const response = await chrome.tabs.sendMessage(tab.id, {
-        action: 'START_COLLECTION',
-        targetCount: 100
+        action: 'START_COLLECTION'
       });
 
       if (response && response.success) {
         const count = response.count || 0;
         updateStatus(`Copied ${count} jobs to clipboard.`, 'success');
       } else {
-        const err = (response && response.error) ? response.error : 'Could not load the next result batch.';
+        const err = (response && response.error) ? response.error : 'Could not extract jobs from page.';
         updateStatus(err, 'error');
       }
     } catch (err) {
       console.error('LinkedIn Job Collector Error:', err);
-      updateStatus('Could not load the next result batch.', 'error');
+      updateStatus('Could not extract jobs from page.', 'error');
     } finally {
       setLoading(false);
     }

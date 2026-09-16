@@ -1,29 +1,30 @@
-# 💼 LinkedIn Job Collector
+# 💼 LinkedIn Job Collector (Stealth Edition)
 
-> A lightweight Chrome & Edge (Manifest V3) extension that collects the first **100 jobs** from any LinkedIn search results page and copies clean CSV directly to your clipboard — with zero page reloads.
+> A lightweight, zero-risk Chrome & Edge (Manifest V3) extension that extracts all jobs visible on your current LinkedIn search page (~25 jobs) and copies clean CSV directly to your clipboard.
 
 ---
 
-## ✨ Features
+## 🛡️ Stealth & Anti-Detection Architecture
 
-- 🚀 **Zero Page Reloads**: Keeps your exact search filters, keywords, URL, and tab state completely intact.
-- ⚡ **Automated SPA Pagination**: Smooth-scrolls to un-occlude virtual cards and programmatically fetches up to 100 unique jobs.
-- 📋 **Direct Clipboard Output**: Copies clean, RFC 4180 escaped CSV straight to your clipboard. No extra file downloads or DevTools needed.
-- 🛡️ **Read-Only & Privacy First**: No tracking, no background servers, no automated applications, and uses minimum Manifest V3 permissions.
-- 🔤 **Full Unicode & Currency Support**: Accurately preserves salary symbols (`₹`, `$`, `€`, `£`) and Unicode text formatting.
+Designed from the ground up to **eliminate account suspension risks & anti-bot flags**:
+
+- 👤 **100% User-Driven Navigation**: Zero automated clicks, page navigations, or synthetic mouse events (`isTrusted === false`). You browse LinkedIn pages naturally.
+- 👁️ **Passive Read-Only Extraction**: Reads existing text directly from the DOM (`innerText`, `getAttribute`). Makes **zero external API/network requests**, leaving zero digital footprint.
+- 🌊 **Humanized Micro-Scrolling**: Smoothly un-occludes virtual list cards using randomized micro-step distances (140px–280px) and jittered human delays (90ms–210ms).
+- 📋 **Direct Clipboard Output**: Copies RFC 4180 formatted CSV straight to your system clipboard without file downloads or DevTools.
 
 ---
 
 ## 📊 Extracted CSV Schema
 
-The generated CSV contains the following **9 fields**:
+The copied CSV contains **9 fields**:
 
 | Field | Type | Description | Example |
 | :--- | :--- | :--- | :--- |
 | **Job ID** | String | Unique LinkedIn Job Identifier | `"4467432818"` |
 | **Title** | String | Clean Job Title | `"Software Development Engineer"` |
 | **Company** | String | Hiring Company Name | `"Clearwater Analytics"` |
-| **Location** | String | Work location & work modality | `"Mumbai (On-site)"` |
+| **Location** | String | Work location & modality | `"Mumbai (On-site)"` |
 | **Salary** | String | Extracted compensation (if listed) | `"₹8 - ₹12 LPA"` |
 | **Posted Date** | String | Relative posting timeframe | `"2 hours ago"` |
 | **Easy Apply** | Boolean | Easy Apply availability flag | `true` |
@@ -34,29 +35,21 @@ The generated CSV contains the following **9 fields**:
 
 ## 🚀 Quick Start (Installation)
 
-1. **Clone or Download** this repository.
-2. Open Chrome or Edge and navigate to `chrome://extensions` (or `edge://extensions`).
-3. Enable **Developer mode** using the toggle switch in the top right corner.
+1. Clone or download this repository.
+2. Navigate to `chrome://extensions` (or `edge://extensions`) in your browser.
+3. Enable **Developer mode** (top-right toggle).
 4. Click **Load unpacked** and select the `job-extractor` directory.
 
 ---
 
 ## 🎯 How to Use
 
-1. Open a LinkedIn Jobs search page (e.g., `https://www.linkedin.com/jobs/search-results/?...`).
-2. Click the **LinkedIn Job Collector** extension icon in your browser toolbar.
-3. Click **"Copy 100 Jobs"**.
-4. Watch the progress status (`Collecting... 25/100`, `Collecting... 50/100`...).
-5. Paste (`Ctrl+V` / `Cmd+V`) your clean CSV directly into **Google Sheets**, **Excel**, **ChatGPT**, or **Python/Pandas**!
-
----
-
-## ⚙️ Tech Stack
-
-- **Manifest V3**
-- **Vanilla JavaScript** (ES2022)
-- **HTML5 & CSS3** (Custom Dark Theme Popup UI)
-- **DOM Parsing & Virtual Scroll Observer**
+1. Open any LinkedIn Jobs search page (e.g., `https://www.linkedin.com/jobs/search-results/?...`).
+2. Click the **LinkedIn Job Collector** extension icon.
+3. Click **"Copy Page Jobs"**.
+4. The extension gently micro-scrolls the container to un-occlude all page cards (~25 jobs) and copies the CSV.
+5. Paste (`Ctrl+V` / `Cmd+V`) into **Google Sheets**, **Excel**, **ChatGPT**, or **Python/Pandas**!
+6. To extract more pages, simply navigate to Page 2 naturally on LinkedIn and click the button again!
 
 ---
 
