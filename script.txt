@@ -1,0 +1,93 @@
+(function copyLinkedInJobsCSV() {
+    const csvRows = [];
+    const seenJobIds = new Set(); 
+
+    // Define the CSV headers
+    const headers = [
+        "Job ID", "Title", "Company", "Location", "Salary", 
+        "Posted Date", "Easy Apply", "Verified", "URL"
+    ];
+    csvRows.push(headers.join(","));
+
+    // Helper function to escape text for CSV
+    const escapeCSV = (text) => {
+        if (!text) return "";
+        let escaped = text.toString().replace(/"/g, '""'); 
+        return `"${escaped}"`; 
+    };
+
+    const jobCards = document.querySelectorAll('[componentkey^="job-card-component-ref-"]');
+
+    jobCards.forEach(card => {
+        const componentKey = card.getAttribute('componentkey');
+        const jobIdMatch = componentKey.match(/ref-(\d+)/);
+        const jobId = jobIdMatch ? jobIdMatch[1] : "";
+
+        // Skip if we already processed this Job ID
+        if (!jobId || seenJobIds.has(jobId)) return; 
+        seenJobIds.add(jobId);
+
+        const dismissBtn = card.querySelector('button[aria-label^="Dismiss"]');
+        let title = "Unknown Title";
+        if (dismissBtn) {
+            title = dismissBtn.getAttribute('aria-label')
+                .replace('Dismiss ', '')
+                .replace(' job', '')
+                .replace(' (Verified job)', '')
+                .trim();
+        } 
+
+        const paragraphs = Array.from(card.querySelectorAll('p'))
+            .map(p => p.innerText.trim().split('\n')[0]) 
+            .filter(text => text.length > 0 && text !== '·');
+
+        const company = paragraphs.length > 1 ? paragraphs[1] : "";
+        const location = paragraphs.length > 2 ? paragraphs[2] : "";
+
+        const salaryStr = paragraphs.find(p => /(INR|₹|\$|LPA|\/month|\/yr)/i.test(p) && /\d/.test(p));
+        const salary = salaryStr ? salaryStr : "";
+
+        const cardText = card.innerText;
+        const isEasyApply = cardText.includes('Easy Apply');
+        const isVerified = cardText.includes('Verified job') || title.includes('Verified');
+
+        let postedDate = "";
+        const postedMatch = cardText.match(/Posted (.*?ago)/i) || cardText.match(/(\d+\s+(minute|hour|day|week|month)s?\s+ago)/i);
+        if (postedMatch) {
+            postedDate = postedMatch[1];
+        }
+
+        const url = jobId ? `https://www.linkedin.com/jobs/view/${jobId}` : "";
+
+        // Build the CSV row
+        const row = [
+            escapeCSV(jobId),
+            escapeCSV(title),
+            escapeCSV(company),
+            escapeCSV(location),
+            escapeCSV(salary),
+            escapeCSV(postedDate),
+            isEasyApply,
+            isVerified,
+            escapeCSV(url)
+        ];
+        csvRows.push(row.join(","));
+    });
+
+    // --- Create CSV String ---
+    const csvString = csvRows.join("\n");
+
+    // --- Copy CSV to Clipboard ---
+    // The copy() function is native to Chrome/Edge DevTools
+    if (typeof copy === 'function') {
+        copy(csvString);
+        console.log(`✅ Success! Copied ${seenJobIds.size} unique jobs to your clipboard in CSV format.`);
+    } else {
+        // Fallback if copy() isn't available
+        navigator.clipboard.writeText(csvString).then(() => {
+            console.log(`✅ Success! Copied ${seenJobIds.size} unique jobs to your clipboard in CSV format.`);
+        }).catch(err => {
+            console.error(`Clipboard copy failed. You might need to click on the page first.`, err);
+        });
+    }
+})();

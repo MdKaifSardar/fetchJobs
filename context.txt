@@ -1,0 +1,513 @@
+Build an extremely simple Chrome/Edge Manifest V3 extension that collects the first 100 jobs from the currently open LinkedIn Jobs search and copies them to the clipboard as CSV.
+
+## Core user experience
+
+The entire workflow should be:
+
+1. User opens a LinkedIn Jobs search results page.
+2. User clicks the extension icon.
+3. User clicks one button: "Copy 100 Jobs".
+4. The extension collects the first 100 unique jobs from the search.
+5. The extension copies the CSV directly to the clipboard.
+6. The popup says: "Copied 100 jobs to clipboard."
+
+There should be NO DevTools usage, NO copy/pasting code, NO manual pagination, and NO manual reloading.
+
+Keep the UI extremely minimal.
+
+## Important: use the CURRENT LinkedIn search URL
+
+The user may be on a URL like this:
+
+https://www.linkedin.com/jobs/search-results/?currentJobId=4467432818&keywords=...&origin=JOB_SEARCH_PAGE_JOB_FILTER&referralSearchId=...&geoId=102713980&distance=25&f_TPR=r86400&f_SAL=...
+
+This is a `linkedin.com/jobs/search-results/` page.
+
+DO NOT construct a new search URL from scratch.
+
+The extension must capture the exact current URL/search state from the browser.
+
+The current URL contains important filters such as:
+
+* keywords
+* geoId
+* distance
+* f_TPR
+* f_SAL
+* origin
+* referralSearchId
+* currentJobId
+* any other parameters
+
+All of these must remain unchanged.
+
+## Pagination
+
+LinkedIn normally displays approximately 25 jobs per result page.
+
+The intended result offsets are:
+
+* 0
+* 25
+* 50
+* 75
+
+Therefore the extension should conceptually retrieve:
+
+Page 1 → jobs 1–25
+Page 2 → jobs 26–50
+Page 3 → jobs 51–75
+Page 4 → jobs 76–100
+
+If LinkedIn exposes the pagination through its SPA/client-side result-loading mechanism, use that mechanism.
+
+IMPORTANT:
+
+DO NOT reload the browser page.
+
+DO NOT use:
+
+location.href = ...
+window.location = ...
+location.reload()
+browser.tabs.update() to navigate the current tab
+
+The user's current search page must remain loaded.
+
+Instead, inspect how the current LinkedIn Jobs SPA loads subsequent result pages/results.
+
+Use LinkedIn's existing client-side navigation/result-loading behavior if available.
+
+## URL pagination state
+
+The underlying LinkedIn pagination commonly corresponds to:
+
+start=0
+start=25
+start=50
+start=75
+
+If the current SPA internally uses these offsets, use them through the existing page/result-loading mechanism.
+
+The extension should preserve the current search state and change only the result offset.
+
+Do NOT rebuild the search query.
+
+## Critical requirement: no page reload
+
+The extension must collect all four batches while keeping the existing LinkedIn page active.
+
+Preferred approaches, in order:
+
+1. Use LinkedIn's existing SPA result-loading/navigation mechanism.
+2. Trigger the existing result pagination control programmatically if it exists.
+3. Trigger the same client-side interaction that LinkedIn itself uses to load the next 25 jobs.
+
+Do NOT implement full-page navigation.
+
+Do NOT open four browser tabs.
+
+Do NOT open four windows.
+
+Do NOT make the user manually click anything.
+
+If LinkedIn's current implementation makes client-side pagination impossible to trigger reliably, report this clearly in the extension instead of silently falling back to page reloads.
+
+## Existing job-card selector
+
+The current working extraction script uses:
+
+document.querySelectorAll('[componentkey^="job-card-component-ref-"]')
+
+Use this as the primary job-card selector.
+
+A component key looks like:
+
+job-card-component-ref-4467432818
+
+Extract the Job ID with:
+
+/ref-(\d+)/
+
+Use Job ID as the unique identifier.
+
+## Fields to extract
+
+Extract exactly these fields:
+
+Job ID
+Title
+Company
+Location
+Salary
+Posted Date
+Easy Apply
+Verified
+URL
+
+CSV header must be exactly:
+
+Job ID,Title,Company,Location,Salary,Posted Date,Easy Apply,Verified,URL
+
+Job URL:
+
+https://www.linkedin.com/jobs/view/{JOB_ID}
+
+## Existing extraction logic
+
+Use the following logic as a starting point.
+
+### Title
+
+Try:
+
+const dismissBtn = card.querySelector('button[aria-label^="Dismiss"]');
+
+If present, get:
+
+dismissBtn.getAttribute('aria-label')
+
+and remove:
+
+"Dismiss "
+" job"
+" (Verified job)"
+
+If that fails, use a robust fallback based on the card's accessible text/link structure.
+
+### Company/location
+
+The current working script obtains:
+
+const paragraphs = Array.from(card.querySelectorAll('p'))
+.map(p => p.innerText.trim().split('\n')[0])
+.filter(text => text.length > 0 && text !== '·');
+
+Currently:
+
+paragraphs[1] = company
+paragraphs[2] = location
+
+Use this as a fallback, but make the extraction tolerant of small LinkedIn DOM changes.
+
+Do not assume paragraph positions are permanently stable.
+
+### Salary
+
+Look for text containing a number and one of:
+
+INR
+₹
+$
+LPA
+/month
+/yr
+
+### Easy Apply
+
+Determine whether the card contains:
+
+Easy Apply
+
+### Verified
+
+Determine whether the card contains:
+
+Verified job
+
+or the title contains:
+
+Verified
+
+### Posted date
+
+Detect formats such as:
+
+Posted 1 day ago
+Posted 2 hours ago
+1 day ago
+2 weeks ago
+30 minutes ago
+
+### URL
+
+Construct from the Job ID:
+
+https://www.linkedin.com/jobs/view/{JOB_ID}
+
+## Collection algorithm
+
+Maintain:
+
+const jobs = new Map();
+
+The key must be Job ID.
+
+For each loaded result batch:
+
+1. Find all job cards.
+2. Extract each job.
+3. Add it to the Map only if its Job ID isn't already present.
+4. Check the number of unique jobs.
+5. Continue until 100 unique jobs exist.
+
+The target is:
+
+100 unique jobs
+
+not merely 100 DOM cards.
+
+## Handling the four result batches
+
+The extension should:
+
+1. Capture the current result state.
+2. Extract currently visible/loaded jobs.
+3. Trigger LinkedIn's client-side loading of the next result batch.
+4. Wait for the job list to actually change/render.
+5. Extract the newly loaded jobs.
+6. Repeat until 100 unique jobs are collected.
+
+Use MutationObserver, DOM polling, or another reliable rendering-detection mechanism rather than fixed arbitrary sleeps alone.
+
+For example, wait until the set of Job IDs changes before extracting the next batch.
+
+## Lazy loading
+
+If LinkedIn lazy-loads job cards:
+
+* scroll the job-results container as necessary
+* wait for additional cards
+* continue until the current batch is fully loaded
+
+Do not scroll the entire webpage unnecessarily.
+
+Identify the actual job-results scrolling container.
+
+## Important: current URL example
+
+The extension must work with URLs structurally like:
+
+https://www.linkedin.com/jobs/search-results/?currentJobId=4467432818&keywords=...&origin=JOB_SEARCH_PAGE_JOB_FILTER&referralSearchId=...&geoId=102713980&distance=25&f_TPR=r86400&f_SAL=...
+
+Do not assume the URL is:
+
+/jobs/search/
+
+Support:
+
+/jobs/search-results/
+
+as the primary target.
+
+## Clipboard
+
+The final output MUST be copied directly to the clipboard.
+
+Do NOT automatically download a CSV file.
+
+The user wants to paste the result into another tool.
+
+Generate a properly escaped CSV string and use the Clipboard API:
+
+navigator.clipboard.writeText(csvString)
+
+If the Clipboard API isn't directly available from the popup context, use an appropriate extension messaging/content-script approach.
+
+The final clipboard contents should look like:
+
+Job ID,Title,Company,Location,Salary,Posted Date,Easy Apply,Verified,URL
+4467432818,"Software Engineer","Example Company","India","₹8 LPA","1 day ago",true,false,"https://www.linkedin.com/jobs/view/4467432818"
+...
+
+## CSV escaping
+
+Every text field must be safely CSV escaped.
+
+If a field contains:
+
+,
+"
+newline
+
+escape it correctly.
+
+Quotes must become:
+
+""
+
+Wrap fields containing text in double quotes.
+
+The CSV must be directly pasteable into:
+
+* Google Sheets
+* Excel
+* ChatGPT
+* Python/pandas
+* other CSV parsers
+
+Use UTF-8 and preserve ₹ correctly.
+
+## Minimal popup
+
+The popup should contain only:
+
+LinkedIn Job Collector
+
+[ Copy 100 Jobs ]
+
+Status text.
+
+Example states:
+
+Ready
+
+Collecting... 25/100
+
+Collecting... 50/100
+
+Collecting... 75/100
+
+Collecting... 100/100
+
+Copied 100 jobs to clipboard.
+
+If fewer than 100 jobs exist:
+
+Copied 63 jobs to clipboard.
+
+If something fails:
+
+Could not load the next result batch.
+
+No unnecessary settings.
+
+No configuration screen.
+
+No CSV download button.
+
+No advanced options.
+
+## Validation
+
+Before starting, verify that the current tab is:
+
+linkedin.com/jobs/search-results/
+
+or another supported LinkedIn Jobs search route.
+
+If not:
+
+"Open a LinkedIn Jobs search page first."
+
+## Do not interfere with LinkedIn
+
+This is a read-only extraction tool.
+
+It must NOT:
+
+* apply to jobs
+* click Apply
+* save jobs
+* follow companies
+* connect with people
+* send messages
+* like posts
+* comment
+* modify the search filters
+* modify the user's LinkedIn profile
+* bypass CAPTCHA
+* bypass authentication
+* bypass LinkedIn security mechanisms
+
+If LinkedIn displays a CAPTCHA, login prompt, rate-limit page, or blocking page, stop.
+
+## Permissions
+
+Use the minimum Manifest V3 permissions necessary.
+
+The extension only needs to operate on LinkedIn Jobs pages.
+
+Do not request broad permissions such as:
+
+<all_urls>
+
+unless technically unavoidable.
+
+Avoid cookies, webRequest, or other privileged permissions unless absolutely necessary.
+
+## Files
+
+Keep the project tiny:
+
+manifest.json
+popup.html
+popup.js
+content.js
+
+Only add a service worker if genuinely required.
+
+No frameworks.
+
+No React.
+
+No build system.
+
+Plain HTML/CSS/JavaScript.
+
+The extension should be loadable directly using Chrome/Edge "Load unpacked".
+
+## README
+
+Include very short instructions:
+
+1. Open chrome://extensions
+2. Enable Developer mode
+3. Click Load unpacked
+4. Select the extension folder
+5. Open a LinkedIn Jobs search
+6. Click the extension
+7. Click "Copy 100 Jobs"
+8. Paste the CSV wherever needed
+
+## Testing
+
+Test specifically against the user's current URL format:
+
+/jobs/search-results/
+
+with complex encoded keywords and multiple filters.
+
+Verify:
+
+* current filters remain unchanged
+* no full-page reload occurs
+* no new tabs are opened
+* approximately 25 jobs are obtained per result batch
+* four batches can produce 100 jobs
+* duplicate Job IDs are removed
+* fewer-than-100-result searches work correctly
+* clipboard contains valid CSV
+* ₹ and other Unicode characters survive correctly
+* popup shows useful progress
+* extension stops at 100 unique jobs
+
+## Final implementation priority
+
+Keep the extension as simple as possible.
+
+The desired experience is:
+
+OPEN LINKEDIN SEARCH
+→ CLICK EXTENSION
+→ CLICK "COPY 100 JOBS"
+→ PASTE CSV
+
+No manual pagination.
+No reloads.
+No downloads.
+No DevTools.
+No configuration.
+No unnecessary UI.
+
+Before implementing, inspect the current LinkedIn Jobs SPA DOM and determine the actual mechanism LinkedIn currently uses to load the next 25-result batch. Use that mechanism rather than guessing or relying solely on URL navigation.
